@@ -45,6 +45,10 @@ Plog = zeros(1,Nstep);  % 光伏功率记录
 Pk = Vk * Ik;              % 计算初始功率
 dPdV_est_f = 0;           % 初始化滤波后的功率斜率估计值
 
+% TODO: 低通滤波器初始化优化
+% 问题：滤波器初始化为0可能导致初始收敛慢，第一次迭代的滤波值不准确
+% 建议：在循环前先进行一次斜率测量，用实际测量值初始化滤波器
+
 %% MPPT主循环 - 基于功率斜率的自适应扰动观察法
 for k = 1:Nstep
     % 1) 记录当前迭代数据
@@ -55,6 +59,11 @@ for k = 1:Nstep
 
     % 2) 预测下一个操作点以估计斜率 dP/dV（数值差分法）
     D_probe = min(max(D + 1e-3, Dmin), Dmax);     % 施加微小扰动用于斜率估计
+
+    % TODO: 斜率估计步长优化
+    % 问题：固定扰动步长1e-3在不同工作条件下可能不是最优选择
+    % 建议：基于当前电压动态调整扰动步长，如使用百分比方式
+
     [V_probe, I_probe] = solve_pv_operating_point(D_probe, Rload, G, Tc, pv);
     P_probe = V_probe * I_probe;  % 计算扰动后的功率
 
@@ -110,112 +119,134 @@ title('PV P–V (current G,T) & MPPT result');
 legend('P–V','MPPT point','Location','best');
 
 % 绘制功率收敛过程
-figure; 
-plot(Plog,'LineWidth',1.2); grid on; 
+figure;
+plot(Plog,'LineWidth',1.2); grid on;
 xlabel('Iteration'); ylabel('P (W)');
 title('Convergence of Power');
 
 % 绘制电压变化过程
-figure; 
-plot(Vlog,'LineWidth',1.2); grid on; 
+figure;
+plot(Vlog,'LineWidth',1.2); grid on;
 xlabel('Iteration'); ylabel('V_{pv} (V)');
 title('PV Voltage vs. Iteration');
 
 % 绘制占空比变化过程
-figure; 
-plot(Dlog,'LineWidth',1.2); grid on; 
+figure;
+plot(Dlog,'LineWidth',1.2); grid on;
 xlabel('Iteration'); ylabel('D');
 title('Duty Ratio vs. Iteration');
 
 % ===== 局部函数定义 =====
 
 function [Vsol, Isol] = solve_pv_operating_point(D, Rload, G, T, params)
-    % 功能：求解给定占空比下的光伏工作点电压和电流
-    % 输入：D-占空比, Rload-负载电阻, G-辐照度, T-温度, params-光伏参数
-    % 输出：Vsol-工作点电压, Isol-工作点电流
-    
-    % 计算Boost变换器在光伏侧看到的等效输入电阻
-    % 理想Boost变换器关系：Rin = Rload * (1-D)^2
-    Rin = Rload * (1 - D)^2;
-    if Rin <= 0, Rin = 1e-6; end  % 防零除保护
+% 功能：求解给定占空比下的光伏工作点电压和电流
+% 输入：D-占空比, Rload-负载电阻, G-辐照度, T-温度, params-光伏参数
+% 输出：Vsol-工作点电压, Isol-工作点电流
 
-    % 定义残差方程：光伏输出电流等于负载电流
-    % f(V) = Ipv(V) - V/Rin = 0
-    f = @(V) pv_current_given_voltage(max(V,0), G, T, params) - max(V,0)/Rin;
+% 计算Boost变换器在光伏侧看到的等效输入电阻
+% 理想Boost变换器关系：Rin = Rload * (1-D)^2
+Rin = Rload * (1 - D)^2;
+if Rin <= 0, Rin = 1e-6; end  % 防零除保护
 
-    % 估算开路电压作为搜索区间上限（简化温度修正）
-    Voc_est = params.Voc_stc * (1 + 0.0*(T-25)/25); % 简化处理，实际应加温度系数
-    V0 = 0.7*Voc_est;  % 初始猜测值，设为估计开路电压的70%
-    
-    % 使用fzero求解非线性方程
-    try
-        % 优先使用区间搜索，提高收敛可靠性
-        Vsol = fzero(f, [0, max(1e-6, 1.2*Voc_est)]);
-    catch
-        % 区间搜索失败时使用单点搜索
-        Vsol = fzero(f, V0);
-    end
-    Vsol = max(Vsol, 0);  % 确保电压非负
-    Isol = pv_current_given_voltage(Vsol, G, T, params);  % 计算对应电流
+% 定义残差方程：光伏输出电流等于负载电流
+% f(V) = Ipv(V) - V/Rin = 0
+f = @(V) pv_current_given_voltage(max(V,0), G, T, params) - max(V,0)/Rin;
+
+% 估算开路电压作为搜索区间上限（简化温度修正）
+Voc_est = params.Voc_stc * (1 + 0.0*(T-25)/25); % 简化处理，实际应加温度系数
+
+% TODO: 开路电压温度修正
+% 问题：未考虑温度对开路电压的影响，实际Voc随温度升高而降低
+% 建议：添加温度系数，如 Voc_est = params.Voc_stc + beta*(T-25)，beta ≈ -0.003/°C
+
+V0 = 0.7*Voc_est;  % 初始猜测值，设为估计开路电压的70%
+
+% TODO: fzero初始猜测优化
+% 问题：固定比例初始值在极端条件下（如低辐照度）可能不理想
+% 建议：基于当前工作条件动态调整初始猜测值
+
+% 使用fzero求解非线性方程
+try
+    % 优先使用区间搜索，提高收敛可靠性
+    Vsol = fzero(f, [0, max(1e-6, 1.2*Voc_est)]);
+catch
+    % 区间搜索失败时使用单点搜索
+    Vsol = fzero(f, V0);
+end
+Vsol = max(Vsol, 0);  % 确保电压非负
+Isol = pv_current_given_voltage(Vsol, G, T, params);  % 计算对应电流
 end
 
 function I = pv_current_given_voltage(V, G, T, params)
-    % 功能：基于单二极管模型计算给定电压下的光伏输出电流
-    % 输入：V-电压, G-辐照度, T-温度, params-光伏参数
-    % 输出：I-电流
-    
-    % 物理常数定义
-    q = 1.602176634e-19;  % 元电荷 [C]
-    k = 1.380649e-23;     % 玻尔兹曼常数 [J/K]
-    T_K = T + 273.15;     % 转换为绝对温度 [K]
-    Vt  = params.Ns * k*T_K / q;  % 热电压，考虑串联电池数
-    n   = params.n;               % 理想因子
+% 功能：基于单二极管模型计算给定电压下的光伏输出电流
+% 输入：V-电压, G-辐照度, T-温度, params-光伏参数
+% 输出：I-电流
 
-    % 计算光生电流 Iph（考虑辐照度和温度影响）
-    Iph_stc = params.Isc_stc;  % STC条件下的光生电流
-    Iph = Iph_stc*(G/1000) + params.alpha_Isc*(T - 25);  % 实际条件下的光生电流
+% 物理常数定义
+q = 1.602176634e-19;  % 元电荷 [C]
+k = 1.380649e-23;     % 玻尔兹曼常数 [J/K]
+T_K = T + 273.15;     % 转换为绝对温度 [K]
+Vt  = params.Ns * k*T_K / q;  % 热电压，考虑串联电池数
+n   = params.n;               % 理想因子
 
-    % 计算反向饱和电流 I0（考虑温度影响）
-    Vt_stc = params.Ns * k*(25+273.15)/q;  % STC条件下的热电压
-    % 由STC条件反推I0_stc：Isc ≈ Iph ≈ I0*exp(Voc/(nVt))
-    I0_stc = Iph_stc / (exp(params.Voc_stc/(n*Vt_stc)) - 1 + 1e-12);
-    Eg = params.Eg;  % 材料禁带宽度
-    
-    % I0的温度修正公式，考虑温度对载流子浓度和扩散系数的影响
-    I0 = I0_stc * (T_K/(25+273.15)).^3 .* ...
-         exp( (q*Eg/k) * (1/(25+273.15) - 1/T_K) / (n*params.Ns) );
+% 计算光生电流 Iph（考虑辐照度和温度影响）
+Iph_stc = params.Isc_stc;  % STC条件下的光生电流
+Iph = Iph_stc*(G/1000) + params.alpha_Isc*(T - 25);  % 实际条件下的光生电流
 
-    % 提取串联和并联电阻参数
-    Rs  = params.Rs;   % 串联电阻
-    Rsh = params.Rsh;  % 并联电阻
+% 计算反向饱和电流 I0（考虑温度影响）
+Vt_stc = params.Ns * k*(25+273.15)/q;  % STC条件下的热电压
+% 由STC条件反推I0_stc：Isc ≈ Iph ≈ I0*exp(Voc/(nVt))
+I0_stc = Iph_stc / (exp(params.Voc_stc/(n*Vt_stc)) - 1 + 1e-12);
 
-    % 定义单二极管模型的隐式方程：f(I) = 0
-    fI = @(I) Iph - I0.*(exp((V + I.*Rs)./(n*Vt)) - 1) - (V + I.*Rs)./Rsh - I;
-    
-    % 设置合理的初始猜测值
-    I_init = max(0, min(Iph, Iph - V/max(Rsh,1e-6)));
-    
-    % 求解非线性方程得到电流值
-    try
-        I = fzero(fI, I_init);
-    catch
-        % 单点搜索失败时使用区间搜索
-        I = fzero(fI, [0, max(0.1, Iph*1.5)]);
-    end
-    I = max(I, 0);  % 确保电流非负
+% TODO: 数值稳定性改进 - 指数溢出保护
+% 问题：当指数参数过大时，exp()函数可能产生Inf，特别是在高电压条件下
+% 建议：添加指数参数限制，如 exp(min(x, 50))
+
+Eg = params.Eg;  % 材料禁带宽度
+
+% I0的温度修正公式，考虑温度对载流子浓度和扩散系数的影响
+I0 = I0_stc * (T_K/(25+273.15)).^3 .* ...
+    exp( (q*Eg/k) * (1/(25+273.15) - 1/T_K) / (n*params.Ns) );
+
+% 提取串联和并联电阻参数
+Rs  = params.Rs;   % 串联电阻
+Rsh = params.Rsh;  % 并联电阻
+
+% 定义单二极管模型的隐式方程：f(I) = 0
+fI = @(I) Iph - I0.*(exp((V + I.*Rs)./(n*Vt)) - 1) - (V + I.*Rs)./Rsh - I;
+
+% TODO: 电流计算数值稳定性增强
+% 问题：指数函数在高压条件下可能数值溢出，导致求解失败
+% 建议：在指数函数中添加参数限制，提高数值稳定性
+
+% 设置合理的初始猜测值
+I_init = max(0, min(Iph, Iph - V/max(Rsh,1e-6)));
+
+% TODO: fzero异常处理增强
+% 问题：当前的try-catch可能无法处理所有异常情况，特别是数值不稳定的情况
+% 建议：添加更详细的错误处理，包括多个备用求解策略
+
+% 求解非线性方程得到电流值
+try
+    I = fzero(fI, I_init);
+catch
+    % 单点搜索失败时使用区间搜索
+    I = fzero(fI, [0, max(0.1, Iph*1.5)]);
+end
+I = max(I, 0);  % 确保电流非负
 end
 
 function [Vvec, Ivec] = sweep_pv_iv(G, T, params)
-    % 功能：扫描生成完整I-V特性曲线
-    % 输入：G-辐照度, T-温度, params-光伏参数
-    % 输出：Vvec-电压向量, Ivec-电流向量
-    
-    Vmax = params.Voc_stc*1.15;  % 设置扫描电压上限（略大于开路电压）
-    Vvec = linspace(0, Vmax, 200);  % 生成200个电压点
-    Ivec = zeros(size(Vvec));       % 预分配电流数组
-    
-    % 遍历所有电压点计算对应电流
-    for i = 1:numel(Vvec)
-        Ivec(i) = pv_current_given_voltage(Vvec(i), G, T, params);
-    end
+% 功能：扫描生成完整I-V特性曲线
+% 输入：G-辐照度, T-温度, params-光伏参数
+% 输出：Vvec-电压向量, Ivec-电流向量
+
+Vmax = params.Voc_stc*1.15;  % 设置扫描电压上限（略大于开路电压）
+Vvec = linspace(0, Vmax, 200);  % 生成200个电压点
+Ivec = zeros(size(Vvec));       % 预分配电流数组
+
+% 遍历所有电压点计算对应电流
+for i = 1:numel(Vvec)
+    Ivec(i) = pv_current_given_voltage(Vvec(i), G, T, params);
+end
 end
