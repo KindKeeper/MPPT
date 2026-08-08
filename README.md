@@ -16,9 +16,15 @@
 
 ```bash
 📦 MPPT
-├── 00-awesome-mppt/           # 精选资源合集（建设中）
+├── run_all.m                    # 一键运行验证全部 .m 算法脚本
+├── python/                      # Python 版算法实现（与 .m 一一对应，跨语言可比）
+│   ├── pv_model.py              #   统一 PV 模型核心（参数+单二极管模型+Boost工作点）
+│   ├── pv_iv_family.py          #   不同辐照度/温度下的曲线族（1.2 节配图）
+│   ├── run_all.py               #   一键运行验证全部 .py 算法脚本
+│   └── figures/                 #   脚本自动输出曲线图（PNG）
+├── 00-awesome-mppt/             # 精选资源合集（建设中）
 │   └── awesome-mppt.md
-├── 01-光伏发电基础/            # 光伏原理基石
+├── 01-光伏发电基础/             # 光伏原理基石
 │   ├── 1.1 光伏效应与太阳能电池工作原理.md
 │   ├── 1.2 光伏阵列的I-V与P-V特性曲线分析.md
 │   └── 1.3 特殊工况分析：局部遮阴及其多峰值现象成因.md
@@ -38,18 +44,25 @@
 │   ├── 5.1 仿真工具与应用.md
 │   ├── 5.2 控制策略的仿真验证.md
 │   └── 5.3 人工智能在MPPT中的应用.md
-├── algorithms/                # 算法实战区
-│   ├── INC_algorithm.m        # 电导增量法
-│   ├── PandO_algorithm.m      # 扰动观察法
-│   └── PSO_algorithm.m        # 粒子群算法
+├── 代码/                       # 算法实战区（均可独立运行）
+    ├── pv_params.m                   # 统一 PV 组件参数（一处修改全仓库生效）
+    ├── pv_current.m                  # 统一单二极管模型电流计算
+    ├── pv_single_diode_model.m       # 光伏单二极管模型与 I-V/P-V 曲线
+    ├── INC_algorithm.m               # 电导增量法
+    ├── PandO_algorithm.m             # 扰动观察法（逐点）
+    ├── perturb_and_observe_basic.m   # 扰动观察法（曲线实现）
+    ├── global_scan_pv.m              # 全局扫描+精跟（局部遮阴多峰）
+    ├── mppt_adaptive_slope_boost.m   # 变步长自适应P&O + Boost（核心）
+    ├── PSO_algorithm.m               # 粒子群算法
+    └── mppt_algorithm_comparison.m   # 多算法性能对比
 ├── figures/                   # 图解仓库
-│   └── (各类原理图/曲线图)      
+│   └── (各类原理图/曲线图)
 ├── Q&A/                       # 智慧结晶
 │   └── Q&A.md                 # 师兄师弟问答录
-├── 代码/                       # 实验性代码（建设中）
-│   └── 电导增量法.m
-└── simulations/               # 仿真模型（建设中）
-    └── (未来存放Simulink模型)  
+└── simulations/               # 仿真模型（Simulink）
+    ├── PV_Systerm.slx              # 光伏系统仿真模型
+    ├── PV_System_better.slx        # 光伏系统（较优方案）
+    └── PV_System_loser.slx         # 光伏系统（对照方案）
 ```
 
 ---
@@ -69,13 +82,25 @@
 
 ### 环境配置
 
-1. 安装`MATLAB 2025b`或更高版本
-2. 确保已安装`Simulink`和`Simscape Electrical`
+1. 安装 `MATLAB 2025b` 或更高版本（运行 `.m` 算法脚本）；`Simulink` + `Simscape Electrical`（运行 `.slx` 仿真模型）
+2. **兼容 Octave**：`.m` 算法脚本在 GNU Octave 下同样可运行（个别绘图依赖工作区）
+3. **Python 版**（可选）：`python/` 目录下的算法脚本与 `.m` 一一对应，统一 PV 模型与数值结果跨语言一致。使用 [uv](https://docs.astral.sh/uv/) 管理依赖：
+
+```bash
+cd python
+uv sync                        # 安装 numpy / matplotlib（自动建虚拟环境）
+uv run python run_all.py       # 一键验证 9 个算法脚本，并输出曲线图到 python/figures/
+```
+
+### 快速复现
+
+在仓库根目录执行 `run_all`，将依次运行全部 8 个算法脚本并给出通过/失败状态。
+Python 版用 `uv run python python/run_all.py`（在仓库根目录），等价验证（9 个脚本）。
 
 ### 如果你是学习者
 
 1. 按数字顺序阅读 `01-05` 目录的理论文档
-2. 运行 `algorithms/` 中的算法文件理解核心逻辑
+2. 运行 `代码/` 中的算法文件理解核心逻辑（或直接运行 `run_all`）
 3. 查看 `Q&A.md` 解答常见困惑
 
 ### 如果你是贡献者
@@ -85,6 +110,11 @@
 - **修正文档**：在理论文档中发现笔误？直接提PR！
 - **补充代码**：优化了算法？新增了仿真模型？欢迎提交！
 - **回答问题**：能解答 `Q&A.md` 中的开放问题？期待你的见解！
+
+### 代码与仿真状态
+
+- `代码/` 下的 `.m` 均为可独立运行的算法脚本
+- `simulations/` 下的 `.slx` 为 Simulink 仿真模型，需在 MATLAB 中打开运行
 
 **协作流程：**
 
