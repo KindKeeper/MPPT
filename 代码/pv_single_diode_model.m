@@ -1,70 +1,44 @@
-function[V_PV,I_PV] = PV_model()
+function [V_PV, I_PV] = pv_single_diode_model()
 % 光伏电池单二极管模型函数
 % 功能：计算并绘制光伏电池的电流-电压(I-V)和功率-电压(P-V)特性曲线
 % 输出：V_PV - 电压向量，I_PV - 电流向量
+% 运行环境：MATLAB 或 Octave
+% 用法：直接调用 pv_single_diode_model 即可看到曲线和最大功率结果。
+%       光伏模型参数统一来自 pv_params() + pv_current()。
 
-% ==== 光伏电池物理参数定义 ====
-V_oc = 36.7;        % 开路电压（V），光伏电池在开路条件下的最大电压
-I_sc = 6.7;         % 短路电流（A），光伏电池在短路条件下的最大电流
-I_o = 3e-10;        % 反向饱和电流[A]，反映PN结反向特性的重要参数
-q = 1.6e-19;        % 元电荷[C]，基本电荷常数，值为1.6×10^-19库仑
-n = 1;              % 理想因子，理想二极管n=1，实际值通常为1-2
-k = 1.38e-23;       % 玻尔兹曼常数[J/K]，热力学统计物理常数
-R_sh = 300;         % 并联电阻(Ω)，模拟电池的旁路漏电效应
-T = 298;            % 温度（K），工作温度，对应25摄氏度（298K = 25°C）
-num_cells = 60;     % 光伏电池串联数量，整个组件由60个单体电池串联
+% ==== 光伏组件参数（统一参数源） ====
+pv = pv_params();
+V_oc = pv.Voc_stc;
 
-% ==== 参数初始化与数组预分配 ====
-% 生成从0到开路电压的1000个均匀分布的电压采样点
+% ==== 生成电压采样点并计算 I-V/P-V 特性 ====
 V_PV = linspace(0, V_oc, 1000);
-% 预分配电流数组，初始化为与电压数组相同大小的零数组
-I_PV = zeros(size(V_PV));
-% 预分配功率数组，用于存储每个电压点对应的功率值
-P = zeros(size(V_PV));
+I_PV = pv_current(V_PV, pv);   % 统一单二极管模型
+P = V_PV .* I_PV;               % 输出功率
 
-% 光生电流计算
-% 在标准条件下，光生电流近似等于短路电流
-I_ph = I_sc;
-    
-% ==== 光伏电池输出特性计算主循环 ====
-% 循环计算每个电压点对应的电流和功率值
-% 注：此处的1000次循环实际只需要1次，因为向量化运算可一次性完成
-% 当前循环结构保留了代码原貌，实际可优化为向量化计算
-for iter = 1:1000
-    % 计算二极管暗电流分量（肖克利二极管方程）
-    % I1 = I_o * [exp(q*V/(n*k*T*N)) - 1]，其中N为串联电池数
-    I1 = I_o*(exp((q*V_PV)/(n*k*T*num_cells))-1);
-    
-    % 计算并联电阻分流电流
-    % 根据欧姆定律：I2 = V / R_sh
-    I2 = V_PV / R_sh;
-    
-    % 计算总输出电流（单二极管模型核心方程）
-    % I_PV = I_ph - I1 - I2
-    % 其中：I_ph为光生电流，I1为二极管暗电流，I2为并联电阻漏电流
-    I_PV = I_ph - I1 - I2;
-    
-    % 计算输出功率
-    % 功率 = 电压 × 电流
-    P = V_PV .* I_PV;    
-end
+% 最大功率点
+[P_mppt, imax] = max(P);
+V_mppt = V_PV(imax);
 
-% 确保电流值为非负数（物理约束）
-% 在实际光伏电池中，电流不可能为负值
-I_PV = max(0, I_PV);
+fprintf('开路电压: %.2f V, 短路电流: %.2f A\n', V_oc, pv.Isc_stc);
+fprintf('最大功率点: V=%.2f V, P=%.2f W\n', V_mppt, P_mppt);
 
-% ==== 结果可视化部分 ====
+% ==== 结果可视化 ====
+% I-V 特性曲线
+figure;
+plot(V_PV, I_PV, '-b');
+xlabel('Voltage (V)');
+ylabel('Current (A)');
+title('I-V 特性曲线');
+grid on;
 
-% 绘制I-V特性曲线（电流-电压关系图）
-figure;  % 创建新的图形窗口
-plot(V_PV, I_PV, '-b');  % 蓝色实线绘制I-V曲线
-xlabel('Voltage (V)')     % X轴标签：电压（伏特）
-ylabel('Current (A)')     % Y轴标签：电流（安培）
-
-% 绘制P-V特性曲线（功率-电压关系图）
-figure;  % 创建新的图形窗口
-plot(V_PV, P, '*r');     % 红色星号标记绘制P-V曲线
-xlabel('Voltage (V)')     % X轴标签：电压（伏特）
-ylabel('Power (W)')       % Y轴标签：功率（瓦特）
+% P-V 特性曲线
+figure;
+plot(V_PV, P, '-r');
+xlabel('Voltage (V)');
+ylabel('Power (W)');
+title('P-V 特性曲线');
+grid on;
+hold on;
+plot(V_mppt, P_mppt, 'ko', 'MarkerSize', 8, 'MarkerFaceColor', 'k');  % 标记MPP
 
 end

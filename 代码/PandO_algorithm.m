@@ -1,46 +1,50 @@
-% 扰动观察法I_PV
-% 光伏电池参数
-I_o = 1e-7;   % 反向饱和电流 [A]
-q = 1.6e-19;  % 元电荷 [C]
-T = 298;      % 室温 [K]
-n = 1.5;      % 理想因子
-k = 1.38e-23; % 玻尔兹曼常数 [J/K]
-step = 0.01; % 扰动步长 [V]
-k1 = 0.03;
-k2 = 0.005;
-P_threshold = 2; % 设定阈值
-V_threshold = 0.5; % 设定阈值
-% P&O算法主循环
-for iter = 1:10000
+%% 扰动观察法（P&O）— 基础单二极管模型版
+% 功能：通过固定/变步长扰动电压，观察功率变化方向，逐步逼近最大功率点
+% 运行环境：MATLAB 或 Octave
+% 说明：本脚本为独立完整示例，直接运行即可看到搜索结果。
+%       光伏模型参数统一来自 pv_params() + pv_current()。
 
-    % 计算当前功率
-    I = I_PV - I_o * (exp((q * V_PV)/(n * k * T)) - 1);
-    P = V_PV * I;
+clear; clc; close all;
 
-    % 电压扰动
-    V_new = V_PV + step;
-    I_new = I_PV - I_o * (exp((q * V_new)/(n * k * T)) - 1);
+% ===== 光伏组件参数（统一参数源） =====
+pv = pv_params();
+V_oc = pv.Voc_stc;
+
+% 单二极管模型电流-电压关系（统一模型入口）
+pv_iv = @(V) pv_current(V, pv);
+
+% ===== P&O 参数 =====
+step = 0.05;        % 初始扰动步长 [V]
+P_threshold = 1;    % 功率变化阈值 [W]，超过则用大步长
+tol = 1e-3;         % 收敛容差 [W]
+max_iter = 1000;    % 最大迭代次数
+
+% 初始化：从约 1/2 开路电压处开始搜索
+V = V_oc/2;
+I = pv_iv(V);
+P = V * I;
+
+% P&O 主循环：固定步长扰动，依据功率增减反转方向（含限幅）
+for iter = 1:max_iter
+    V_new = V + step;                 % 施加扰动
+    I_new = pv_iv(V_new);
     P_new = V_new * I_new;
-    delta_P = abs(P_new - P);
-    delta_V = abs(V_new - V_PV);    
-    
-    % 判断功率变化方向
-    if delta_P > P_threshold
-        step = k1 * delta_P ; % 大功率下步长变大 
-    elseif delta_V < V_threshold
-            step = -k2 * delta_P; % 接近极值点时缩小步长
+
+    if P_new > P
+        step = abs(step);             % 功率上升，保持方向
     else
-        step = step; % 默认步长
+        step = -abs(step);            % 功率下降，反转方向
     end
+    V = min(max(V_new, 0), V_oc);        % 限幅
 
-    % 更新电压
-    V_PV = V_new;
-
-    % 终止条件: 功率变化小于阈值
-    if abs(P_new - P) < 1e-3
-       break;
+    if abs(P_new - P) < tol
+        break;                           % 收敛
     end
+    P = P_new;
 end
 
-V_mppt = V_PV;
-P_mppt = P;
+V_mppt = V; I_mppt = pv_iv(V); P_mppt = V * I_mppt;
+
+fprintf('MPPT电压: %.2f V\n', V_mppt);
+fprintf('MPPT电流: %.2f A\n', I_mppt);
+fprintf('MPPT功率: %.2f W\n', P_mppt);
